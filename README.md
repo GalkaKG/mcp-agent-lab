@@ -98,6 +98,15 @@ The Python agent implements a tool-calling loop:
 
 The agent supports multiple tool calls within a single request, subject to a configurable iteration limit.
 
+### Conversation Memory
+
+The agent keeps the conversation history for the whole session, so follow-up questions work naturally.
+
+- The full history (user messages, tool calls, tool results and answers) is sent to the model with every request.
+- Only the last `MAX_HISTORY_TURNS` user turns are kept, so the context does not grow indefinitely.
+- Old turns are trimmed at user-message boundaries, so a tool call is never separated from its result.
+- Type `reset` to clear the memory and start a new conversation.
+
 ### Statistical Analysis
 
 The `calculate_statistics` tool provides:
@@ -229,7 +238,7 @@ The agent will:
 2. Establish an MCP client session.
 3. Discover available tools.
 4. Connect to the local Ollama API.
-5. Initialize the interactive AI agent.
+5. Initialize the interactive AI agent with conversation memory.
 
 Make sure the Ollama service is running before you start the agent (`ollama list` should work).
 
@@ -288,7 +297,21 @@ Standard Deviation: 14.14
 
 ---
 
-### Example 3: Current Date and Time
+### Example 3: Conversation Memory
+
+**Input:**
+```text
+You: Calculate 125 multiplied by 48.
+You: Now divide it by 4.
+```
+
+The agent remembers the previous result (6000) and calls `divide` with `a = 6000` and `b = 4`, without the number being repeated.
+
+To start a new conversation, type `reset`.
+
+---
+
+### Example 4: Current Date and Time
 
 **Input:**
 ```text
@@ -307,15 +330,19 @@ The main configuration parameters are defined in `agent.py`:
 MODEL = "qwen3:8b"
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MAX_TOOL_CALLS = 10
+MAX_HISTORY_TURNS = 10
 ```
 
-You can change the model by updating the `MODEL` variable to another locally available Ollama model.
+- `MODEL` – the local Ollama model. You can change it to another locally available model.
+- `MAX_TOOL_CALLS` – maximum number of tool-calling iterations per request.
+- `MAX_HISTORY_TURNS` – number of recent user turns kept in the conversation memory.
 
 ---
 
 ## Current Limitations
 
-- Conversation history is not persisted between user requests.
+- Conversation memory is kept only while the agent is running. It is not saved to disk and is lost on exit.
+- Memory is limited by the number of turns, not by tokens, so very large inputs can still exceed the model context.
 - Tool execution is currently limited by a configurable iteration count.
 - CSV analysis currently accepts CSV content as input rather than directly exploring arbitrary local files.
 - Tool access and file permissions require additional security controls before production use.
@@ -325,7 +352,6 @@ You can change the model by updating the `MODEL` variable to another locally ava
 ## Roadmap
 
 Planned improvements:
-- [ ] Add conversation memory.
 - [ ] Implement advanced CSV file analysis using Pandas.
 - [ ] Add automatic data profiling and missing-value detection.
 - [ ] Enable more complex multi-step tool execution.
