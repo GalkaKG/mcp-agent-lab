@@ -20,6 +20,18 @@ OLLAMA_URL = "http://localhost:11434/api/chat"
 
 MAX_TOOL_CALLS = 10
 
+# Conversation memory: how many recent user turns to keep
+MAX_HISTORY_TURNS = 10
+
+SYSTEM_PROMPT = (
+    "You are a helpful AI data assistant. "
+    "You have access to external tools through MCP. "
+    "Use tools whenever they are necessary to answer "
+    "the user's request. "
+    "Never invent tool results. "
+    "After receiving tool results, explain them clearly."
+)
+
 # Locate MCP Server independently of the working directory
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -100,28 +112,46 @@ async def execute_tool(session, tool_name, arguments):
 
 
 # =====================================================
+# CONVERSATION MEMORY
+# =====================================================
+
+def new_history():
+    """Create a fresh conversation containing only the system prompt."""
+    return [{"role": "system", "content": SYSTEM_PROMPT}]
+
+
+def trim_history(messages):
+    """
+    Keep the system prompt and only the last MAX_HISTORY_TURNS user turns.
+    Trimming always starts at a user message, so an assistant tool call
+    is never separated from its tool result.
+    """
+    user_positions = [
+        i for i, m in enumerate(messages) if m["role"] == "user"
+    ]
+
+    if len(user_positions) <= MAX_HISTORY_TURNS:
+        return messages
+
+    start = user_positions[-MAX_HISTORY_TURNS]
+
+    return [messages[0]] + messages[start:]
+
+
+# =====================================================
 # AI AGENT LOOP
 # =====================================================
 
-async def run_agent(session, http_client, user_message, ollama_tools):
+async def run_agent(session, http_client, messages, user_message, ollama_tools):
 
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a helpful AI data assistant. "
-                "You have access to external tools through MCP. "
-                "Use tools whenever they are necessary to answer "
-                "the user's request. "
-                "Never invent tool results. "
-                "After receiving tool results, explain them clearly."
-            )
-        },
-        {
-            "role": "user",
-            "content": user_message
-        }
-    ]
+    # Add the new request to the shared conversation history
+    messages.append({
+        "role": "user",
+        "content": user_message
+    })
+
+    # Drop the oldest turns (in place, so the caller sees the change)
+    messages[:] = trim_history(messages)
 
     for iteration in range(MAX_TOOL_CALLS):
 
@@ -253,7 +283,10 @@ async def main():
 
                 print("[OLLAMA] Connected successfully!")
 
-                print("\nType 'exit' to quit.")
+                print("\nType 'exit' to quit, 'reset' to clear memory.")
+
+                # One conversation history for the whole session
+                messages = new_history()
 
                 while True:
 
@@ -265,14 +298,19 @@ async def main():
                     if not user_message:
                         continue
 
+                    if user_message.lower() == "reset":
+                        messages = new_history()
+                        print("[MEMORY] Conversation cleared.")
+                        continue
+
                     await run_agent(
                         session,
                         http_client,
+                        messages,
                         user_message,
                         ollama_tools
                     )
 
 
 if __name__ == "__main__":
-
     asyncio.run(main())

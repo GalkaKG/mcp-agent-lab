@@ -124,23 +124,25 @@ The `calculate_statistics` tool provides:
 ## Project Structure
 
 ```text
-MCP Server/
+mcp-agent-lab/
 │
 ├── MCP Agent/
 │   └── agent.py
 │
 ├── MCP Server/
-│   ├── server.py
-│   └── requirements.txt
-
+│   └── server.py
+│
+├── requirements.txt
+├── .gitignore
+└── README.md
 ```
 
 ### File Responsibilities
 
 - `agent.py` – Connects to Ollama, initializes the MCP client, discovers available tools, and manages the AI tool-calling loop.
 - `server.py` – Implements the MCP server and exposes Python functions as tools.
-- `requirements.txt` – Contains the MCP server dependencies.
-- `test.py` and `test.ipynb` – Development and experimentation files.
+- `requirements.txt` – Contains the project dependencies (MCP SDK, HTTPX, Pandas). Located in the repository root and must be saved as UTF-8.
+
 
 ## Getting Started
 
@@ -149,6 +151,7 @@ MCP Server/
 Make sure you have installed:
 
 - Python 3.10+
+- MCP Python SDK 2.x (installed through `requirements.txt`)
 - Ollama
 - Git (optional)
 
@@ -160,7 +163,7 @@ https://ollama.com/
 
 ### 2. Download the Qwen3 Model
 
-In Windows Open PowerShell and run:
+In Windows, open PowerShell and run:
 
 ```powershell
 ollama pull qwen3:8b
@@ -175,8 +178,8 @@ ollama list
 ### 3. Clone the Repository
 
 ```bash
-git clone <YOUR_REPOSITORY_URL>
-cd "MCP Server"
+git clone git@github.com:GalkaKG/mcp-agent-lab.git
+cd mcp-agent-lab
 ```
 
 ### 4. Create a Virtual Environment
@@ -193,23 +196,25 @@ Activate it:
 
 ### 5. Install Dependencies
 
-Install the MCP server dependencies:
+From the repository root, install the dependencies:
 
 ```bash
-pip install -r ".\MCP Server\requirements.txt"
+pip install -r requirements.txt
 ```
 
-Install HTTPX:
+The file contains:
 
-```bash
-pip install httpx
+```text
+mcp[cli]>=2.0
+httpx
+pandas
 ```
 
 ### 6. Start the AI Agent
 
 Navigate to the agent directory:
 
-```bash
+```powershell
 cd ".\MCP Agent"
 ```
 
@@ -225,6 +230,8 @@ The agent will:
 3. Discover available tools.
 4. Connect to the local Ollama API.
 5. Initialize the interactive AI agent.
+
+Make sure the Ollama service is running before you start the agent (`ollama list` should work).
 
 ---
 
@@ -326,6 +333,3 @@ Planned improvements:
 - [ ] Add support for additional MCP servers.
 - [ ] Implement logging and execution tracing.
 - [ ] Add a user-friendly interface.
-
----
-
