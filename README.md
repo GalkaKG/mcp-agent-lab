@@ -98,14 +98,30 @@ The Python agent implements a tool-calling loop:
 
 The agent supports multiple tool calls within a single request, subject to a configurable iteration limit.
 
+### Web Interface
+
+A browser-based chat interface built with Gradio (`app.py`).
+
+- Chat window with your conversation history.
+- Every tool call is shown in a collapsible block with its arguments and result.
+- Clickable example questions.
+- "New conversation" button that clears the memory.
+- Uses the same agent logic, MCP server and `memory.json` as the console version, so the conversation continues in either interface.
+
 ### Conversation Memory
 
-The agent keeps the conversation history for the whole session, so follow-up questions work naturally.
+The agent keeps the conversation history, so follow-up questions work naturally, even after the program is restarted.
+
+- The conversation is saved to `MCP Agent/memory.json` after every request and restored on the next start.
+- The file is written safely (temporary file first), so a crash cannot corrupt the existing memory.
+- If a request fails, the unfinished turn is removed from memory.
+- A damaged memory file is renamed to `memory.json.bak` and the agent starts a new conversation.
+- `memory.json` is listed in `.gitignore`, because it contains your conversations.
 
 - The full history (user messages, tool calls, tool results and answers) is sent to the model with every request.
 - Only the last `MAX_HISTORY_TURNS` user turns are kept, so the context does not grow indefinitely.
 - Old turns are trimmed at user-message boundaries, so a tool call is never separated from its result.
-- Type `reset` to clear the memory and start a new conversation.
+- Type `reset` to clear the memory and start a new conversation (this also clears the saved file).
 
 ### Statistical Analysis
 
@@ -136,7 +152,9 @@ The `calculate_statistics` tool provides:
 mcp-agent-lab/
 │
 ├── MCP Agent/
-│   └── agent.py
+│   ├── agent.py           (console interface)
+│   ├── app.py             (web interface)
+│   └── memory.json        (created automatically)
 │
 ├── MCP Server/
 │   └── server.py
@@ -148,6 +166,8 @@ mcp-agent-lab/
 
 ### File Responsibilities
 
+- `app.py` – Web interface (Gradio). Reuses the agent logic from `agent.py`.
+- `memory.json` – Created automatically; stores the saved conversation (not committed to git).
 - `agent.py` – Connects to Ollama, initializes the MCP client, discovers available tools, and manages the AI tool-calling loop.
 - `server.py` – Implements the MCP server and exposes Python functions as tools.
 - `requirements.txt` – Contains the project dependencies (MCP SDK, HTTPX, Pandas). Located in the repository root and must be saved as UTF-8.
@@ -217,9 +237,23 @@ The file contains:
 mcp[cli]>=2.0
 httpx
 pandas
+gradio>=5
 ```
 
 ### 6. Start the AI Agent
+
+You can use the agent from the console or from the browser. Both share the same memory.
+
+#### Option A: Web interface
+
+```powershell
+cd ".\MCP Agent"
+python app.py
+```
+
+Then open http://127.0.0.1:7860 in your browser. The page starts the MCP server and connects to Ollama automatically. Stop it with `Ctrl+C`.
+
+#### Option B: Console
 
 Navigate to the agent directory:
 
@@ -233,7 +267,7 @@ Run:
 python agent.py
 ```
 
-The agent will:
+The console agent will:
 1. Start the MCP server as a separate process.
 2. Establish an MCP client session.
 3. Discover available tools.
@@ -307,6 +341,13 @@ You: Now divide it by 4.
 
 The agent remembers the previous result (6000) and calls `divide` with `a = 6000` and `b = 4`, without the number being repeated.
 
+The memory is saved to disk, so after you type `exit` and start the agent again, it still remembers the conversation:
+
+```text
+[MEMORY] Restored 2 previous message(s) from memory.json.
+You: What was the last result?
+```
+
 To start a new conversation, type `reset`.
 
 ---
@@ -331,17 +372,20 @@ MODEL = "qwen3:8b"
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MAX_TOOL_CALLS = 10
 MAX_HISTORY_TURNS = 10
+MEMORY_FILE = BASE_DIR / "memory.json"
 ```
 
 - `MODEL` – the local Ollama model. You can change it to another locally available model.
 - `MAX_TOOL_CALLS` – maximum number of tool-calling iterations per request.
 - `MAX_HISTORY_TURNS` – number of recent user turns kept in the conversation memory.
+- `MEMORY_FILE` – file where the conversation is saved between sessions.
 
 ---
 
 ## Current Limitations
 
-- Conversation memory is kept only while the agent is running. It is not saved to disk and is lost on exit.
+- Only one conversation is stored. Use `reset` to start a new one; older conversations are not archived.
+- The memory file is stored as plain, unencrypted JSON.
 - Memory is limited by the number of turns, not by tokens, so very large inputs can still exceed the model context.
 - Tool execution is currently limited by a configurable iteration count.
 - CSV analysis currently accepts CSV content as input rather than directly exploring arbitrary local files.
@@ -358,4 +402,3 @@ Planned improvements:
 - [ ] Improve error handling and input validation.
 - [ ] Add support for additional MCP servers.
 - [ ] Implement logging and execution tracing.
-- [ ] Add a user-friendly interface.

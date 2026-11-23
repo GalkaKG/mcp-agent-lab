@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -36,6 +37,18 @@ SYSTEM_PROMPT = (
 BASE_DIR = Path(__file__).resolve().parent
 
 SERVER_PATH = BASE_DIR.parent / "MCP Server" / "server.py"
+
+# Persistent memory: conversation is saved here after every request
+MEMORY_FILE = BASE_DIR / "memory.json"
+
+
+# =====================================================
+# HELPERS
+# =====================================================
+
+def strip_thinking(text):
+    """Remove the <think>...</think> reasoning block that Qwen3 may add."""
+    return re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
 
 
 # =====================================================
@@ -120,6 +133,59 @@ def new_history():
     return [{"role": "system", "content": SYSTEM_PROMPT}]
 
 
+def save_history(messages):
+    """
+    Save the conversation to MEMORY_FILE.
+    Writes to a temporary file first, so a crash during saving
+    cannot corrupt the existing memory.
+    """
+    temp_file = MEMORY_FILE.with_suffix(".tmp")
+
+    try:
+        temp_file.write_text(
+            json.dumps(messages, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8"
+        )
+        temp_file.replace(MEMORY_FILE)
+
+    except OSError as error:
+        print(f"[MEMORY] Could not save memory: {error}")
+
+
+def load_history():
+    """
+    Load the saved conversation, or start a new one if there is none.
+    A damaged memory file is renamed to memory.json.bak, not deleted.
+    """
+    if not MEMORY_FILE.exists():
+        return new_history()
+
+    try:
+        data = json.loads(MEMORY_FILE.read_text(encoding="utf-8"))
+
+        if not isinstance(data, list) or not all(
+            isinstance(m, dict) and "role" in m for m in data
+        ):
+            raise ValueError("unexpected memory file format")
+
+    except (OSError, ValueError) as error:
+        backup = MEMORY_FILE.with_suffix(".json.bak")
+        print(f"[MEMORY] Memory file is damaged ({error}).")
+
+        try:
+            MEMORY_FILE.replace(backup)
+            print(f"[MEMORY] Saved a copy as {backup.name}. Starting fresh.")
+        except OSError:
+            print("[MEMORY] Starting fresh.")
+
+        return new_history()
+
+    # Always use the current system prompt, drop any old one
+    history = [m for m in data if m["role"] != "system"]
+
+    return trim_history(new_history() + history)
+
+
 def trim_history(messages):
     """
     Keep the system prompt and only the last MAX_HISTORY_TURNS user turns.
@@ -143,6 +209,15 @@ def trim_history(messages):
 # =====================================================
 
 async def run_agent(session, http_client, messages, user_message, ollama_tools):
+    """
+    Process one user request.
+
+    Prints the progress to the console and returns a dictionary:
+        {"answer": str, "tools": [{"name", "arguments", "result"}, ...]}
+    so other interfaces (for example the web UI) can display it.
+    """
+
+    tool_log = []
 
     # Add the new request to the shared conversation history
     messages.append({
@@ -173,6 +248,11 @@ async def run_agent(session, http_client, messages, user_message, ollama_tools):
 
         assistant_message = data["message"]
 
+        # Keep the reasoning block out of the answer and the memory
+        assistant_message["content"] = strip_thinking(
+            assistant_message.get("content", "")
+        )
+
         messages.append(assistant_message)
 
         tool_calls = assistant_message.get("tool_calls", [])
@@ -184,7 +264,10 @@ async def run_agent(session, http_client, messages, user_message, ollama_tools):
 
             print(assistant_message.get("content", ""))
 
-            return
+            return {
+                "answer": assistant_message.get("content", ""),
+                "tools": tool_log
+            }
 
         # Execute requested tools
         for tool_call in tool_calls:
@@ -212,6 +295,12 @@ async def run_agent(session, http_client, messages, user_message, ollama_tools):
                     "error": str(error)
                 }
 
+            tool_log.append({
+                "name": tool_name,
+                "arguments": arguments,
+                "result": result
+            })
+
             messages.append({
                 "role": "tool",
                 "name": tool_name,
@@ -223,6 +312,11 @@ async def run_agent(session, http_client, messages, user_message, ollama_tools):
             })
 
     print("\nMaximum tool iterations reached.")
+
+    return {
+        "answer": "Maximum tool iterations reached.",
+        "tools": tool_log
+    }
 
 
 # =====================================================
@@ -285,8 +379,18 @@ async def main():
 
                 print("\nType 'exit' to quit, 'reset' to clear memory.")
 
-                # One conversation history for the whole session
-                messages = new_history()
+                # Conversation history, restored from the previous session
+                messages = load_history()
+
+                saved_turns = sum(
+                    1 for m in messages if m["role"] == "user"
+                )
+
+                if saved_turns:
+                    print(
+                        f"[MEMORY] Restored {saved_turns} previous "
+                        f"message(s) from {MEMORY_FILE.name}."
+                    )
 
                 while True:
 
@@ -300,17 +404,31 @@ async def main():
 
                     if user_message.lower() == "reset":
                         messages = new_history()
+                        save_history(messages)
                         print("[MEMORY] Conversation cleared.")
                         continue
 
-                    await run_agent(
-                        session,
-                        http_client,
-                        messages,
-                        user_message,
-                        ollama_tools
-                    )
+                    backup = list(messages)
+
+                    try:
+
+                        await run_agent(
+                            session,
+                            http_client,
+                            messages,
+                            user_message,
+                            ollama_tools
+                        )
+
+                    except Exception as error:
+
+                        # Remove the unfinished request from memory
+                        messages[:] = backup
+                        print(f"\n[ERROR] Request failed: {error}")
+
+                    save_history(messages)
 
 
 if __name__ == "__main__":
+
     asyncio.run(main())

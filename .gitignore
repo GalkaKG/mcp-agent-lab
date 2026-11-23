@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 venv/
 .venv/
+memory.json
+memory.json.bak
+memory.tmp
